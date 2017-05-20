@@ -19,14 +19,14 @@
 #include <linux/elevator.h>
 #include <linux/state_notifier.h>
 
-#define NOOP_IOSCHED "noop"
+#define ZEN_IOSCHED "zen"
 #define RESTORE_DELAY_MS (10000)
 
 struct req_queue_data {
 	struct list_head list;
 	struct request_queue *queue;
 	char prev_e[ELV_NAME_MAX];
-	bool using_noop;
+	bool using_zen;
 };
 
 static struct delayed_work restore_prev;
@@ -37,29 +37,29 @@ static struct req_queue_data req_queues = {
 
 static struct notifier_block notif;
 
-static void change_elevator(struct req_queue_data *r, bool use_noop)
+static void change_elevator(struct req_queue_data *r, bool use_zen)
 {
 	struct request_queue *q = r->queue;
 
-	if (r->using_noop == use_noop)
+	if (r->using_zen == use_zen)
 		return;
 
-	r->using_noop = use_noop;
+	r->using_zen = use_zen;
 
-	if (use_noop) {
+	if (use_zen) {
 		strcpy(r->prev_e, q->elevator->type->elevator_name);
-		elevator_change(q, NOOP_IOSCHED);
+		elevator_change(q, ZEN_IOSCHED);
 	} else {
 		elevator_change(q, r->prev_e);
 	}
 }
 
-static void change_all_elevators(struct list_head *head, bool use_noop)
+static void change_all_elevators(struct list_head *head, bool use_zen)
 {
 	struct req_queue_data *r;
 
 	list_for_each_entry(r, head, list)
-		change_elevator(r, use_noop);
+		change_elevator(r, use_zen);
 }
 
 static int state_notifier_callback(struct notifier_block *this,
@@ -68,7 +68,7 @@ static int state_notifier_callback(struct notifier_block *this,
 	switch (event) {
 		case STATE_NOTIFIER_ACTIVE:
 			/*
-			 * Switch back from noop to the original iosched after a delay
+			 * Switch back from zen to the original iosched after a delay
 			 * when the screen is turned on.
 			 */
 			schedule_delayed_work(&restore_prev,
@@ -76,7 +76,7 @@ static int state_notifier_callback(struct notifier_block *this,
 			break;
 		case STATE_NOTIFIER_SUSPEND:
 			/*
-			 * Switch to noop when the screen turns off. Purposely block
+			 * Switch to zen when the screen turns off. Purposely block
 			 * the state notifier chain call in case weird things can happen
 			 * when switching elevators while the screen is off.
 			 */
