@@ -1715,13 +1715,13 @@ __read_mostly unsigned int sysctl_sched_freq_account_wait_time;
  * For increase, send notification if
  *      freq_required - cur_freq > sysctl_sched_freq_inc_notify
  */
-__read_mostly int sysctl_sched_freq_inc_notify = 10 * 1024 * 1024; /* + 10GHz */
+__read_mostly int sysctl_sched_freq_inc_notify = 400000; // for msm8992/msm8994
 
 /*
  * For decrease, send notification if
  *      cur_freq - freq_required > sysctl_sched_freq_dec_notify
  */
-__read_mostly int sysctl_sched_freq_dec_notify = 10 * 1024 * 1024; /* - 10GHz */
+__read_mostly int sysctl_sched_freq_dec_notify = 400000; // for msm8992/msm8994
 
 static __read_mostly unsigned int sched_io_is_busy;
 
@@ -4180,9 +4180,6 @@ int sched_fork(struct task_struct *p)
 		p->sched_class = &fair_sched_class;
 	}
 
-	if (p->sched_class->task_fork)
-		p->sched_class->task_fork(p);
-
 	/*
 	 * The child is not yet in the pid-hash so no cgroup attach races,
 	 * and the cgroup is pinned to this child due to cgroup_fork()
@@ -4191,7 +4188,13 @@ int sched_fork(struct task_struct *p)
 	 * Silence PROVE_RCU.
 	 */
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
-	set_task_cpu(p, cpu);
+	/*
+	 * We're setting the cpu for the first time, we don't migrate,
+	 * so use __set_task_cpu().
+	 */
+	__set_task_cpu(p, cpu);
+	if (p->sched_class->task_fork)
+		p->sched_class->task_fork(p);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 
 #if defined(CONFIG_SCHEDSTATS) || defined(CONFIG_TASK_DELAY_ACCT)
@@ -4333,8 +4336,11 @@ void wake_up_new_task(struct task_struct *p)
 	 * Fork balancing, do it here and not earlier because:
 	 *  - cpus_allowed can change in the fork path
 	 *  - any previously selected cpu might disappear through hotplug
+	 *
+	 * Use __set_task_cpu() to avoid calling sched_class::migrate_task_rq,
+	 * as we're not fully set-up yet.
 	 */
-	set_task_cpu(p, select_task_rq(p, SD_BALANCE_FORK, 0));
+	__set_task_cpu(p, select_task_rq(p, SD_BALANCE_FORK, 0));
 #endif
 
 	rq = __task_rq_lock(p);
@@ -7797,7 +7803,8 @@ void show_state_filter(unsigned long state_filter)
 	touch_all_softlockup_watchdogs();
 
 #ifdef CONFIG_SYSRQ_SCHED_DEBUG
-	sysrq_sched_debug_show();
+	if (!state_filter)
+		sysrq_sched_debug_show();
 #endif
 	rcu_read_unlock();
 	/*
@@ -8015,8 +8022,13 @@ static int __migrate_task(struct task_struct *p, int src_cpu, int dest_cpu)
 	bool moved = false;
 	int ret = 0;
 
-	if (unlikely(!cpu_active(dest_cpu)))
-		return ret;
+	if (p->flags & PF_KTHREAD) {
+		if (unlikely(!cpu_online(dest_cpu)))
+			return ret;
+	} else {
+		if (unlikely(!cpu_active(dest_cpu)))
+			return ret;
+	}
 
 	rq_src = cpu_rq(src_cpu);
 	rq_dest = cpu_rq(dest_cpu);
